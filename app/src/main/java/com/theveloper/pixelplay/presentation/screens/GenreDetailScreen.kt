@@ -7,7 +7,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -45,6 +48,7 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.data.model.Artist
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.ExpressiveTopBarContent
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
@@ -57,6 +61,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.GenreDetailViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.GroupedSongListItem
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
+import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
 import com.theveloper.pixelplay.utils.formatDuration
 import com.theveloper.pixelplay.utils.hexToColor
@@ -239,19 +244,14 @@ fun GenreDetailScreen(
                         end = if ((lazyListState.canScrollForward || lazyListState.canScrollBackward) && collapseFraction > 0.95f) 20.dp else 8.dp,
                         bottom = fabBottomPadding + 148.dp
                     ),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                     items(displaySections, key = { it.id }) { section ->
+                    displaySections.forEach { section ->
                         when (section) {
                             is SectionData.ArtistSection -> {
-                                val artistImage = remember(section.artistName, artists) {
-                                    artists.find { it.name.equals(section.artistName, ignoreCase = true) }?.imageUrl
-                                }
-
-                                ArtistSectionItem(
+                                ArtistSection(
                                     section = section,
-                                    artistImageUrl = artistImage,
+                                    artists = artists,
                                     onSongClick = { song ->
                                         playerViewModel.showAndPlaySong(song, sortedSongs, uiState.genre?.name ?: "Genre")
                                     },
@@ -260,8 +260,8 @@ fun GenreDetailScreen(
                                 )
                             }
                             is SectionData.AlbumSection -> {
-                                AlbumSectionItem(
-                                    album = section.album,
+                                AlbumSection(
+                                    section = section,
                                     onSongClick = { song ->
                                          playerViewModel.showAndPlaySong(song, sortedSongs, uiState.genre?.name ?: "Genre")
                                     },
@@ -270,21 +270,29 @@ fun GenreDetailScreen(
                                 )
                             }
                             is SectionData.FlatList -> {
-                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                     section.songs.forEach { song ->
-                                         EnhancedSongListItem(
-                                             song = song,
-                                             isPlaying = stablePlayerState.isPlaying,
-                                             isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                                             onClick = {
-                                                 playerViewModel.showAndPlaySong(song, sortedSongs, uiState.genre?.name ?: "Genre")
-                                             },
-                                             onMoreOptionsClick = { showSongOptionsSheet = it }
-                                         )
-                                     }
-                                 }
+                                // Add vertical spacing before flat list if needed, or handle within
+                                // For FlatList, we can just use items directly but simpler to keep consistency
+                                items(
+                                    items = section.songs,
+                                    key = { it.id }
+                                ) { song ->
+                                    Box(modifier = Modifier.animateItem()) {
+                                        EnhancedSongListItem(
+                                            song = song,
+                                            isPlaying = stablePlayerState.isPlaying,
+                                            isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                                            onClick = {
+                                                playerViewModel.showAndPlaySong(song, sortedSongs, uiState.genre?.name ?: "Genre")
+                                            },
+                                            onMoreOptionsClick = { showSongOptionsSheet = it }
+                                        )
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                }
                             }
                         }
+                        // Add spacing between sections
+                        item { Spacer(Modifier.height(16.dp)) }
                     }
                 }
             }
@@ -557,25 +565,33 @@ private fun buildSectionsByAlbum(songs: List<Song>): List<SectionData> {
      }
 }
 
-// --- Section Composables ---
+// --- Section Extensions ---
 
-// --- Section Composables ---
-
-@Composable
-fun ArtistSectionItem(
+fun LazyListScope.ArtistSection(
     section: SectionData.ArtistSection,
-    artistImageUrl: String?,
+    artists: List<Artist>,
     onSongClick: (Song) -> Unit,
-    stablePlayerState: com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState, 
+    stablePlayerState: StablePlayerState,
     onMoreOptionsClick: (Song) -> Unit
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha=0.5f)),
-        shape = AbsoluteSmoothCornerShape(24.dp, 60),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier) {
-            // Header
+    val artistImage = artists.find { it.name.equals(section.artistName, ignoreCase = true) }?.imageUrl
+    val containerColor = Color(0xFF2B2930).copy(alpha = 0.5f) // MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha=0.5f) - Hardcoded for now or access via @Composable context if possible?
+    // We can't access MaterialTheme.colorScheme inside LazyListScope unless we use a Composable item wrapper.
+    // We can just use the item { } block to access Composable scope.
+
+    // 1. Artist Header
+    item(key = "header_${section.id}") {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+            shape = AbsoluteSmoothCornerShape(
+                cornerRadiusTR = 24.dp, smoothnessAsPercentTR = 60,
+                cornerRadiusTL = 24.dp, smoothnessAsPercentTL = 60,
+                cornerRadiusBR = 0.dp, smoothnessAsPercentBR = 0,
+                cornerRadiusBL = 0.dp, smoothnessAsPercentBL = 0
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Header Content
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxWidth()
@@ -584,17 +600,17 @@ fun ArtistSectionItem(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)
                 ) {
-                     Box(
+                    Box(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (!artistImageUrl.isNullOrEmpty()) {
+                        if (!artistImage.isNullOrEmpty()) {
                             AsyncImage(
                                 model = ImageRequest.Builder(LocalContext.current)
-                                    .data(artistImageUrl)
+                                    .data(artistImage)
                                     .crossfade(true)
                                     .build(),
                                 contentDescription = section.artistName,
@@ -606,11 +622,13 @@ fun ArtistSectionItem(
                                 imageVector = Icons.Rounded.Person,
                                 contentDescription = "Generic Artist",
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(10.dp).fillMaxSize()
+                                modifier = Modifier
+                                    .padding(10.dp)
+                                    .fillMaxSize()
                             )
                         }
                     }
-                    
+
                     Spacer(Modifier.width(12.dp))
                     Text(
                         text = section.artistName,
@@ -622,113 +640,205 @@ fun ArtistSectionItem(
                     )
                 }
             }
-            
-            //Spacer(Modifier.height(8.dp))
-            
-            section.albums.forEachIndexed { index, album ->
-                if (index > 0) HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).alpha(0.3f))
-                AlbumSectionItemInArtist(album, onSongClick, stablePlayerState, onMoreOptionsClick)
+        }
+    }
+
+    // 2. Albums Loop
+    section.albums.forEachIndexed { albumIndex, album ->
+        if (albumIndex > 0) {
+            item(key = "divider_${section.id}_$albumIndex") {
+                 Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    HorizontalDivider(modifier = Modifier.alpha(0.3f))
+                }
+            }
+        }
+
+        AlbumSectionItems(
+            album = album,
+            onSongClick = onSongClick,
+            stablePlayerState = stablePlayerState,
+            onMoreOptionsClick = onMoreOptionsClick,
+            isLastAlbumInSection = albumIndex == section.albums.lastIndex,
+            useArtistStyle = true
+        )
+    }
+}
+
+fun LazyListScope.AlbumSection(
+    section: SectionData.AlbumSection,
+    onSongClick: (Song) -> Unit,
+    stablePlayerState: com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState,
+    onMoreOptionsClick: (Song) -> Unit
+) {
+    AlbumSectionItems(
+        album = section.album,
+        onSongClick = onSongClick,
+        stablePlayerState = stablePlayerState,
+        onMoreOptionsClick = onMoreOptionsClick,
+        isLastAlbumInSection = true,
+        useArtistStyle = false // Standalone album
+    )
+}
+
+// Logic shared between Artist-embedded albums and Standalone albums
+fun LazyListScope.AlbumSectionItems(
+    album: AlbumData,
+    onSongClick: (Song) -> Unit,
+    stablePlayerState: com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState,
+    onMoreOptionsClick: (Song) -> Unit,
+    isLastAlbumInSection: Boolean,
+    useArtistStyle: Boolean
+) {
+    // Background handling:
+    // If useArtistStyle == true, we are inside the Artist Card, so we need to continue the surfaceContainerLow background behavior.
+    // If usageArtistStyle == false, we are a standalone Card, so we need to start/end the card shape ourselves.
+    
+    // Header Shape
+    // ArtistStyle: Rect (middle of card)
+    // Standalone: TopRounded (start of card)
+    
+    item(key = "album_header_${album.name}") {
+        val containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f)
+        val shape = if (useArtistStyle) {
+            RectangleShape
+        } else {
+             AbsoluteSmoothCornerShape(
+                cornerRadiusTR = 24.dp, smoothnessAsPercentTR = 60,
+                cornerRadiusTL = 24.dp, smoothnessAsPercentTL = 60,
+                cornerRadiusBR = 0.dp, smoothnessAsPercentBR = 0,
+                cornerRadiusBL = 0.dp, smoothnessAsPercentBL = 0
+            )
+        }
+        
+        Box(
+             modifier = Modifier
+                .fillMaxWidth()
+                .background(containerColor, shape)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SmartImage(
+                    model = album.artUri,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = album.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${album.songs.size} songs",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        if(album.songs.isNotEmpty()) onSongClick(album.songs.first())
+                    },
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = "Play Album")
+                }
             }
         }
     }
-}
-
-@Composable
-fun AlbumSectionItem(
-    album: AlbumData,
-    onSongClick: (Song) -> Unit,
-    stablePlayerState: com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState,
-    onMoreOptionsClick: (Song) -> Unit
-) {
-     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f)),
-        shape = AbsoluteSmoothCornerShape(24.dp, 60),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        AlbumSectionItemInArtist(album, onSongClick, stablePlayerState, onMoreOptionsClick)
-    }
-}
-
-@Composable
-fun AlbumSectionItemInArtist(
-    album: AlbumData,
-    onSongClick: (Song) -> Unit,
-    stablePlayerState: com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState,
-    onMoreOptionsClick: (Song) -> Unit
-) {
-    Column {
-        Row(
+    
+    // Spacing Item
+    item(key = "album_spacer_${album.name}") {
+         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(top = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-             SmartImage(
-                model = album.artUri,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                 Text(
-                    text = album.name,
-                    style = MaterialTheme.typography.titleMedium,
-                     maxLines = 1,
-                     overflow = TextOverflow.Ellipsis,
-                    fontWeight = FontWeight.SemiBold
-                )
-                 Text(
-                    text = "${album.songs.size} songs",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-             IconButton(
-                onClick = { 
-                    if(album.songs.isNotEmpty()) onSongClick(album.songs.first()) // Simple play first of album
-                },
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Icon(Icons.Rounded.PlayArrow, contentDescription = "Play Album")
-            }
-        }
+                .height(10.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
+        )
+    }
 
-        Spacer(Modifier.height(10.dp))
+    // Songs
+    val songCount = album.songs.size
+    itemsIndexed(
+        items = album.songs,
+        key = { index, song -> song.id }
+    ) { index, song ->
+        val isLastSong = index == songCount - 1
         
-        Column(
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier
-                .padding(top = 10.dp)
-                .padding(horizontal = 8.dp)
-        ) {
-            val songCount = album.songs.size
-            album.songs.forEachIndexed { index, song ->
-                val shape = when {
-                     songCount == 1 -> RoundedCornerShape(16.dp)
-                     index == 0 -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-                     index == songCount - 1 -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
-                     else -> RoundedCornerShape(4.dp)
-                }
-
+        // Shape for the SONG ITEM itself (visual ripple/highlight shape)
+        val songItemShape = when {
+            songCount == 1 -> RoundedCornerShape(16.dp)
+            index == 0 -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+            isLastSong -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+            else -> RoundedCornerShape(4.dp)
+        }
+        
+       // Container Shape (The "Card" background)
+       // If useArtistStyle:
+       //   If isLastAlbumInSection && isLastSong -> BottomRounded.
+       //   Else -> Rect.
+       // If Standalone:
+       //   If isLastSong -> BottomRounded.
+       //   Else -> Rect.
+       
+       val containerShape = if (isLastSong && isLastAlbumInSection) {
+            AbsoluteSmoothCornerShape(
+                cornerRadiusTR = 0.dp, smoothnessAsPercentTR = 0,
+                cornerRadiusTL = 0.dp, smoothnessAsPercentTL = 0,
+                cornerRadiusBR = 24.dp, smoothnessAsPercentBR = 60,
+                cornerRadiusBL = 24.dp, smoothnessAsPercentBL = 60
+            ) 
+       } else {
+           RectangleShape
+       }
+       
+       Box(
+           modifier = Modifier
+               .fillMaxWidth()
+               .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f), containerShape)
+               // Padding internal to the card logic
+               .padding(horizontal = 8.dp) 
+               .padding(bottom = if (isLastSong && !isLastAlbumInSection && useArtistStyle) 8.dp else 0.dp) // Add spacing if there are more albums? No, Divider handles it.
+       ) {
+            // Extra spacing logic handled by `Arrangement.spacedBy(2.dp)` in original column.
+            // Here we are flat items. Content padding?
+            // Original: Column(verticalArrangement = Arrangement.spacedBy(2.dp))
+            // So we need 2.dp padding between songs?
+            // We can add padding to top of items except first one?
+            
+            Column {
+                if (index > 0) Spacer(Modifier.height(2.dp))
+                
                 EnhancedSongListItem(
                      song = song,
                      isPlaying = stablePlayerState.isPlaying,
                      isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                     showAlbumArt = false, // Hide album art as it is redundant
-                     customShape = shape,
-                     onClick = {
-                         onSongClick(song)
-                     },
+                     showAlbumArt = false,
+                     customShape = songItemShape,
+                     onClick = { onSongClick(song) },
                      onMoreOptionsClick = onMoreOptionsClick
                  )
+                 
+                 // Bottom spacing for the very last item in the album to push it off the edge of the card?
+                 if (isLastSong) Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
-        }
+       }
     }
 }
