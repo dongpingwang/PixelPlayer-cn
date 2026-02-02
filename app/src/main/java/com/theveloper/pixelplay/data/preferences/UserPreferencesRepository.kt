@@ -113,6 +113,8 @@ constructor(
         val KEEP_PLAYING_IN_BACKGROUND = booleanPreferencesKey("keep_playing_in_background")
         val IS_CROSSFADE_ENABLED = booleanPreferencesKey("is_crossfade_enabled")
         val CROSSFADE_DURATION = intPreferencesKey("crossfade_duration")
+        val CUSTOM_GENRES = androidx.datastore.preferences.core.stringSetPreferencesKey("custom_genres")
+        val CUSTOM_GENRE_ICONS = stringPreferencesKey("custom_genre_icons") // JSON Map<String, Int>
         val REPEAT_MODE = intPreferencesKey("repeat_mode")
         val IS_SHUFFLE_ON = booleanPreferencesKey("is_shuffle_on")
         val PERSISTENT_SHUFFLE_ENABLED = booleanPreferencesKey("persistent_shuffle_enabled")
@@ -172,6 +174,9 @@ constructor(
         val TAP_BACKGROUND_CLOSES_PLAYER = booleanPreferencesKey("tap_background_closes_player")
         val IMMERSIVE_LYRICS_ENABLED = booleanPreferencesKey("immersive_lyrics_enabled")
         val IMMERSIVE_LYRICS_TIMEOUT = longPreferencesKey("immersive_lyrics_timeout")
+        
+        // Genre View Preference
+        val IS_GENRE_GRID_VIEW = booleanPreferencesKey("is_genre_grid_view")
     }
 
     val appRebrandDialogShownFlow: Flow<Boolean> =
@@ -289,9 +294,55 @@ constructor(
             }
 
     suspend fun setCrossfadeDuration(duration: Int) {
-        dataStore.edit { preferences -> preferences[PreferencesKeys.CROSSFADE_DURATION] = duration }
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.CROSSFADE_DURATION] = duration
+        }
     }
 
+    // Custom Genres Names
+    val customGenresFlow: Flow<Set<String>> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.CUSTOM_GENRES] ?: emptySet()
+        }
+
+    // Custom Genres Icons (JSON Map: Name -> ResId)
+    val customGenreIconsFlow: Flow<Map<String, Int>> =
+        dataStore.data.map { preferences ->
+            val jsonString = preferences[PreferencesKeys.CUSTOM_GENRE_ICONS]
+            if (jsonString != null) {
+                try {
+                    json.decodeFromString<Map<String, Int>>(jsonString)
+                } catch (e: Exception) {
+                    emptyMap()
+                }
+            } else {
+                emptyMap()
+            }
+        }
+
+    suspend fun addCustomGenre(genre: String, iconResId: Int? = null) {
+        dataStore.edit { preferences ->
+            val currentGenres = preferences[PreferencesKeys.CUSTOM_GENRES] ?: emptySet()
+            preferences[PreferencesKeys.CUSTOM_GENRES] = currentGenres + genre
+            
+            if (iconResId != null) {
+                val currentIconsJson = preferences[PreferencesKeys.CUSTOM_GENRE_ICONS]
+                val currentIcons = if (currentIconsJson != null) {
+                    try {
+                        json.decodeFromString<Map<String, Int>>(currentIconsJson)
+                    } catch (e: Exception) {
+                        emptyMap()
+                    }
+                } else {
+                    emptyMap()
+                }
+                
+                val newIcons = currentIcons.toMutableMap()
+                newIcons[genre] = iconResId
+                preferences[PreferencesKeys.CUSTOM_GENRE_ICONS] = json.encodeToString(newIcons)
+            }
+        }
+    }
     val repeatModeFlow: Flow<Int> =
             dataStore.data.map { preferences ->
                 preferences[PreferencesKeys.REPEAT_MODE] ?: Player.REPEAT_MODE_OFF
@@ -554,6 +605,17 @@ constructor(
     suspend fun saveYourMixSongIds(songIds: List<String>) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.YOUR_MIX_SONG_IDS] = json.encodeToString(songIds)
+        }
+    }
+
+    val isGenreGridViewFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.IS_GENRE_GRID_VIEW] ?: true // Default to Grid (true)
+        }
+
+    suspend fun setGenreGridView(isGrid: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.IS_GENRE_GRID_VIEW] = isGrid
         }
     }
 
