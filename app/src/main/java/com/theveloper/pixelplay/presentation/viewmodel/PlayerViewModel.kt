@@ -362,10 +362,22 @@ class PlayerViewModel @Inject constructor(
                 val lyrics = update.second
                 // Check if this update is relevant to the currently playing song OR the selected song
                 if (playbackStateHolder.stablePlayerState.value.currentSong?.id == song.id) {
-                     updateSongInStates(song, lyrics)
+                     // MERGE FIX: if song comes back empty (e.g. from reset), preserve current metadata
+                     val currentSong = playbackStateHolder.stablePlayerState.value.currentSong
+                     val safeSong = if (song.title.isEmpty() && currentSong != null) {
+                        currentSong.copy(lyrics = "")
+                     } else {
+                        song
+                     }
+                     updateSongInStates(safeSong, lyrics)
                 }
                 if (_selectedSongForInfo.value?.id == song.id) {
-                    _selectedSongForInfo.value = song
+                    val currentSelected = _selectedSongForInfo.value
+                    if (song.title.isEmpty() && currentSelected != null) {
+                         _selectedSongForInfo.value = currentSelected.copy(lyrics = "")
+                    } else {
+                        _selectedSongForInfo.value = song
+                    }
                 }
             }
         }
@@ -694,6 +706,12 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.isFoldersPlaylistViewFlow.collect { isPlaylistView ->
                 setFoldersPlaylistViewState(isPlaylistView)
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.isAlbumsListViewFlow.collect { isList ->
+                _playerUiState.update { it.copy(isAlbumsListView = isList) }
             }
         }
 
@@ -1890,24 +1908,17 @@ class PlayerViewModel @Inject constructor(
 
     fun deleteFromDevice(activity: Activity, song: Song, onResult: (Boolean) -> Unit = {}){
         viewModelScope.launch {
+            // Failsafe: Prevent deleting the currently playing song
+            if (playbackStateHolder.stablePlayerState.value.currentSong?.id == song.id) {
+                _toastEvents.emit("Cannot delete currently playing song")
+                onResult(false)
+                return@launch
+            }
+
             val userConfirmed = showMaterialDeleteConfirmation(activity, song)
             if (!userConfirmed) {
                 onResult(false)
                 return@launch
-            }
-            // Check if we're currently playing the song being deleted
-            if (playbackStateHolder.stablePlayerState.value.currentSong?.id == song.id) {
-                listeningStatsTracker.finalizeCurrentSession()
-                mediaController?.pause()
-                mediaController?.stop()
-                mediaController?.clearMediaItems()
-                playbackStateHolder.updateStablePlayerState {
-                    it.copy(
-                        currentSong = null,
-                        isPlaying = false,
-                        totalDuration = 0L
-                    )
-                }
             }
 
             val success = metadataEditStateHolder.deleteSong(song)
@@ -2131,6 +2142,12 @@ class PlayerViewModel @Inject constructor(
                 currentFolderPath = null,
                 currentFolder = null
             )
+        }
+    }
+
+    fun setAlbumsListView(isList: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setAlbumsListView(isList)
         }
     }
 
